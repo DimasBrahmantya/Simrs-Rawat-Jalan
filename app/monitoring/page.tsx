@@ -1,10 +1,10 @@
 import { Layout } from "@/app/components/Layout";
-import { RegistrationForm } from "@/app/components/RegistrationForm";
+import { MonitoringDashboard } from "@/app/components/MonitoringDashboard";
 
 export default function Page() {
   return (
     <Layout>
-      <RegistrationForm />
+      <MonitoringDashboard />
     </Layout>
   );
 }

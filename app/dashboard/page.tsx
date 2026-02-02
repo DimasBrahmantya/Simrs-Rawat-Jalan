@@ -1,10 +1,10 @@
 import { Layout } from "@/app/components/Layout";
-import { RegistrationForm } from "@/app/components/RegistrationForm";
+import { QueueDashboard } from "@/app/components/QueueDashboard";
 
 export default function Page() {
   return (
     <Layout>
-      <RegistrationForm />
+      <QueueDashboard />
     </Layout>
   );
 }
