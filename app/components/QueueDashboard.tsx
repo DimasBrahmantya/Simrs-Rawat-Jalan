@@ -29,8 +29,7 @@ import {
 import { Badge } from "@/app/components/ui/badge";
 import { cn } from "@/lib/utils";
 
-
-import { Patient, PatientStatus } from "@/app/types/patient";
+import { PatientStatus } from "@/app/types/patient";
 
 /* ================= STATUS CONFIG ================= */
 
@@ -64,86 +63,84 @@ const statusConfig: Record<
 };
 
 export function QueueDashboard() {
-  const [patients, setPatients] = useState<Patient[]>([]);
+  const [visits, setVisits] = useState<any[]>([]);
   const [filterPoli, setFilterPoli] = useState("all");
 
   const today = new Date().toISOString().split("T")[0];
 
   /* ================= FETCH DB ================= */
   useEffect(() => {
-  const fetchQueue = async () => {
-    const res = await fetch("/api/queue", { cache: "no-store" });
-    const data = await res.json();
-    setPatients(data);
-  };
+    const fetchQueue = async () => {
+      const res = await fetch("/api/visits", { cache: "no-store" });
+      const data = await res.json();
+      setVisits(data);
+    };
 
-  fetchQueue(); // load awal
+    fetchQueue(); // load awal
 
-  const interval = setInterval(fetchQueue, 2000); // ⏱ polling 2 detik
+    const interval = setInterval(fetchQueue, 2000); // ⏱ polling 2 detik
 
-  return () => clearInterval(interval);
-}, []);
+    return () => clearInterval(interval);
+  }, []);
 
-
-  const todayPatients = useMemo(() => {
-    return patients
-      .filter((p) => p.registrationDate === today)
-      .filter((p) => filterPoli === "all" || p.poli === filterPoli)
+  const todayVisits = useMemo(() => {
+    return visits
+      .filter((v) => v.registrationDate === today)
+      .filter((v) => filterPoli === "all" || v.poliId?.name === filterPoli)
       .sort((a, b) => {
         const priority: Record<PatientStatus, number> = {
           called: 0,
           waiting: 1,
           completed: 2,
         };
-        if (priority[a.status] !== priority[b.status]) {
-          return priority[a.status] - priority[b.status];
+        if (priority[a.status as PatientStatus] !== priority[b.status as PatientStatus]) {
+          return priority[a.status as PatientStatus] - priority[b.status as PatientStatus];
         }
         return a.queueNumber - b.queueNumber;
       });
-  }, [patients, today, filterPoli]);
+  }, [visits, today, filterPoli]);
 
   const [lastSpokenId, setLastSpokenId] = useState<string | null>(null);
-  const calledPatient = todayPatients.find((p) => p.status === "called");
+  const calledVisit = todayVisits.find((v) => v.status === "called");
   useEffect(() => {
-  if (!calledPatient) return;
+    if (!calledVisit) return;
 
-  if (calledPatient._id === lastSpokenId) return;
+    if (calledVisit._id === lastSpokenId) return;
 
-  const speak = () => {
-    if (!("speechSynthesis" in window)) return;
+    const speak = () => {
+      if (!("speechSynthesis" in window)) return;
 
-    window.speechSynthesis.cancel(); // stop suara sebelumnya
+      window.speechSynthesis.cancel(); // stop suara sebelumnya
 
-    const text = `
-      Nomor antrian ${calledPatient.queueDisplay},
-      atas nama ${calledPatient.name},
-      silakan menuju ${calledPatient.poli}
-    `;
+      const text = `
+        Nomor antrian ${calledVisit.queueDisplay},
+        atas nama ${calledVisit.patientId?.name},
+        silakan menuju ${calledVisit.poliId?.name}
+      `;
 
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = "id-ID";
-    utterance.rate = 0.9; // kecepatan
-    utterance.pitch = 1;
-    utterance.volume = 1;
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = "id-ID";
+      utterance.rate = 0.9; // kecepatan
+      utterance.pitch = 1;
+      utterance.volume = 1;
 
-    window.speechSynthesis.speak(utterance);
-    setLastSpokenId(calledPatient._id);
-  };
+      window.speechSynthesis.speak(utterance);
+      setLastSpokenId(calledVisit._id);
+    };
 
-  // workaround browser (Safari / Chrome)
-  if (window.speechSynthesis.getVoices().length === 0) {
-    window.speechSynthesis.onvoiceschanged = speak;
-  } else {
-    speak();
-  }
-}, [calledPatient, lastSpokenId]);
-
+    // workaround browser (Safari / Chrome)
+    if (window.speechSynthesis.getVoices().length === 0) {
+      window.speechSynthesis.onvoiceschanged = speak;
+    } else {
+      speak();
+    }
+  }, [calledVisit, lastSpokenId]);
 
   const stats = {
-    waiting: todayPatients.filter((p) => p.status === "waiting").length,
-    called: todayPatients.filter((p) => p.status === "called").length,
-    completed: todayPatients.filter((p) => p.status === "completed").length,
-    total: todayPatients.length,
+    waiting: todayVisits.filter((v) => v.status === "waiting").length,
+    called: todayVisits.filter((v) => v.status === "called").length,
+    completed: todayVisits.filter((v) => v.status === "completed").length,
+    total: todayVisits.length,
   };
 
   const [mounted, setMounted] = useState(false);
@@ -153,15 +150,15 @@ export function QueueDashboard() {
   }, []);
 
   const polis = useMemo(
-  () => [...new Set(patients.map((p) => p.poli))],
-  [patients]
-);
+    () => [...new Set(visits.map((v) => v.poliId?.name).filter(Boolean))],
+    [visits]
+  );
   if (!mounted) return null;
 
   return (
     /* ================= WRAPPER (SPACING KONSISTEN) ================= */
     <div className="px-2 sm:px-4 space-y-6">
-      {/* ================= HEADER ================= */}
+      {/* ================= HEADER ================= */
       <Card className="overflow-hidden border shadow-md p-0">
         <CardHeader className="bg-gradient-to-r from-sky-600 to-cyan-500 text-white px-6 py-6">
           <div className="flex items-center justify-between flex-wrap gap-4">
@@ -199,7 +196,7 @@ export function QueueDashboard() {
         </CardHeader>
       </Card>
 
-      {/* ================= STATS ================= */}
+      /* ================= STATS ================= */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard icon={Users} label="Total Hari Ini" value={stats.total} />
         <StatCard
@@ -223,7 +220,7 @@ export function QueueDashboard() {
       </div>
 
       {/* ================= CALLED ================= */}
-      {calledPatient && (
+      {calledVisit && (
         <Card className="border-2 border-called shadow-lg">
           <CardContent className="p-8">
             <div className="flex items-center gap-2 text-called mb-4">
@@ -236,17 +233,17 @@ export function QueueDashboard() {
             <div className="flex flex-col md:flex-row items-center justify-between gap-6">
               <div className="text-center md:text-left">
                 <p className="text-7xl font-bold text-primary">
-                  {calledPatient.queueDisplay}
+                  {calledVisit.queueDisplay}
                 </p>
-                <p className="text-2xl">{calledPatient.name}</p>
+                <p className="text-2xl">{calledVisit.patientId?.name}</p>
               </div>
 
               <div className="text-center md:text-right">
                 <Badge variant="outline" className="text-lg px-4 py-2">
-                  {calledPatient.poli}
+                  {calledVisit.poliId?.name}
                 </Badge>
                 <p className="text-muted-foreground">
-                  {calledPatient.doctorName}
+                  {calledVisit.doctorId?.name}
                 </p>
               </div>
             </div>

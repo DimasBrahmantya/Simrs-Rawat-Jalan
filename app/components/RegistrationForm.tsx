@@ -48,36 +48,45 @@ import {
 } from "@/app/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
-import { Patient, RegistrationFormData } from "../types/patient";
-import { doctors } from "../stores/patientStore";
+import { Patient } from "../types/patient";
 
 /* ================= VALIDATION ================= */
 const registrationSchema = z.object({
-  name: z.string().min(3).max(100),
-  ktpNumber: z
-    .string()
-    .length(16)
-    .regex(/^\d{16}$/),
-  birthDate: z.string().min(1),
+  name: z.string().regex(/^[A-Za-z\s]+$/, "Nama hanya boleh huruf").min(3),
+  ktpNumber: z.string().length(16).regex(/^\d{16}$/),
+  birthDate: z.string().min(1, "Tanggal lahir wajib diisi"),
   address: z.string().min(10).max(500),
-  doctorId: z.string().min(1),
+  poliId: z.string().min(1, "Poli wajib dipilih"),
+  doctorId: z.string().min(1, "Dokter wajib dipilih"),
+  scheduleId: z.string().min(1, "Jadwal wajib dipilih"),
+  phoneNumber: z.string().regex(/^08\d{8,11}$/, "Nomor HP tidak valid"),
 });
 
 type FormValues = z.infer<typeof registrationSchema>;
 
 export function RegistrationForm() {
+  const [polis, setPolis] = useState<any[]>([]);
+  const [doctorsByPoli, setDoctorsByPoli] = useState<any[]>([]);
+  const [schedules, setSchedules] = useState<any[]>([]);
   const [birthDateOpen, setBirthDateOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date>();
   const [registeredPatient, setRegisteredPatient] = useState<Patient | null>(
     null,
   );
   const [showSuccessDialog, setShowSuccessDialog] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [today, setToday] = useState("");
 
+  /* ================= INIT ================= */
   useEffect(() => {
     setToday(format(new Date(), "yyyy-MM-dd"));
+
+    fetch("/api/polis")
+      .then((res) => res.json())
+      .then(setPolis);
   }, []);
 
+  /* ================= FORM ================= */
   const {
     register,
     handleSubmit,
@@ -87,102 +96,145 @@ export function RegistrationForm() {
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
     resolver: zodResolver(registrationSchema),
-    defaultValues: {
-      name: "",
-      ktpNumber: "",
-      birthDate: "",
-      address: "",
-      doctorId: "",
-    },
   });
 
+  const selectedPoliId = watch("poliId");
   const selectedDoctorId = watch("doctorId");
-  const selectedDoctor = doctors.find((d) => d.id === selectedDoctorId);
+  const ktp = watch("ktpNumber");
 
+  /* ================= POLI → DOKTER ================= */
+  useEffect(() => {
+    if (!selectedPoliId) return;
+
+    fetch(`/api/doctors?poliId=${selectedPoliId}`)
+      .then((res) => res.json())
+      .then(setDoctorsByPoli);
+
+    setValue("doctorId", "");
+    setValue("scheduleId", "");
+    setSchedules([]);
+  }, [selectedPoliId, setValue]);
+
+  /* ================= DOKTER → JADWAL ================= */
+  useEffect(() => {
+    if (!selectedDoctorId) return;
+
+    fetch(`/api/doctor-schedules?doctorId=${selectedDoctorId}`)
+      .then((res) => res.json())
+      .then((data) => {
+        // Filter jadwal berdasarkan hari pendaftaran (hari ini)
+        const currentDay = format(new Date(), "EEEE", { locale: idLocale }); // e.g., "Senin"
+        const filteredSchedules = data.filter((s: any) => s.day === currentDay);
+        setSchedules(filteredSchedules);
+      });
+
+    setValue("scheduleId", "");
+  }, [selectedDoctorId, setValue]);
+
+  /* ================= KTP AUTOFILL ================= */
+  useEffect(() => {
+    if (ktp?.length !== 16) return;
+
+    fetch(`/api/patients/by-ktp?ktp=${ktp}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (!data) return;
+
+        setValue("name", data.name);
+        setValue("address", data.address);
+        setValue("phoneNumber", data.phoneNumber);
+
+        if (data.birthDate) {
+          const [day, month, year] = data.birthDate.split("-");
+          const parsedDate = new Date(+year, +month - 1, +day);
+
+          setSelectedDate(parsedDate);
+          setValue("birthDate", data.birthDate);
+        }
+      });
+  }, [ktp, setValue]);
+
+  /* ================= HANDLERS ================= */
   const handleKtpChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.replace(/\D/g, "").slice(0, 16);
     setValue("ktpNumber", value, { shouldValidate: true });
   };
 
-  const isDoctorAvailable = (doctor: (typeof doctors)[0]) =>
-    today && doctor.availableDates.includes(today);
-
   const onSubmit = async (data: FormValues) => {
     setSubmitError(null);
 
-    const res = await fetch("/api/patients", {
+    // Cek jika tidak ada jadwal untuk dokter yang dipilih
+    if (schedules.length === 0) {
+      setSubmitError("Tidak ada jadwal untuk dokter ini pada hari ini. Silakan pilih dokter lain.");
+      return;
+    }
+
+    const selectedPoli = polis.find((p) => p._id === data.poliId);
+    const selectedDoctor = doctorsByPoli.find(
+      (d) => d._id === data.doctorId,
+    );
+
+    // Buat patient baru
+    const patientRes = await fetch("/api/patients", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ...data,
+        poli: selectedPoli?.name,
         doctorName: selectedDoctor?.name,
-        poli: selectedDoctor?.poli,
       }),
     });
 
-    const result = await res.json();
+    const patientResult = await patientRes.json();
 
-    // ❌ KTP DUPLIKAT
-    if (!res.ok) {
-      setSubmitError(result.message || "Pendaftaran gagal");
+    if (!patientRes.ok) {
+      setSubmitError(patientResult.message || "Pendaftaran gagal");
       return;
     }
 
-    // ✅ SUKSES
-    setRegisteredPatient(result);
+    // Buat visit untuk patient yang baru dibuat
+    const visitRes = await fetch("/api/visits", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ktpNumber: data.ktpNumber,
+        poliId: data.poliId,
+        doctorId: data.doctorId,
+        scheduleId: data.scheduleId,
+      }),
+    });
+
+    const visitResult = await visitRes.json();
+
+    if (!visitRes.ok) {
+      setSubmitError(visitResult.message || "Kunjungan gagal dibuat");
+      return;
+    }
+
+    // Gunakan data dari visit untuk dialog
+    setRegisteredPatient({
+      ...visitResult,
+      name: visitResult.name,
+      poli: visitResult.poli,
+      doctorName: visitResult.doctorName,
+      registrationDate: visitResult.registrationDate,
+      queueDisplay: visitResult.queueDisplay,
+    });
     setShowSuccessDialog(true);
     reset();
+    setSelectedDate(undefined);
   };
 
-  const [submitError, setSubmitError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const ktp = watch("ktpNumber");
-
-    if (ktp?.length === 16) {
-      fetch(`/api/patients/by-ktp?ktp=${ktp}`)
-        .then((res) => res.json())
-        .then((data) => {
-          if (data) {
-            setValue("name", data.name);
-            setValue("address", data.address);
-
-            // ===== SYNC TANGGAL LAHIR =====
-            if (data.birthDate) {
-              // asumsi format "dd-MM-yyyy"
-              const [day, month, year] = data.birthDate.split("-");
-              const parsedDate = new Date(
-                Number(year),
-                Number(month) - 1,
-                Number(day),
-              );
-
-              setSelectedDate(parsedDate);
-              setValue("birthDate", data.birthDate);
-            }
-          }
-        });
-    }
-  }, [watch("ktpNumber")]);
-
+  /* ================= PRINT ================= */
   const printRef = useRef<HTMLDivElement>(null);
   const handlePrint = () => {
-    if (!printRef.current) return;
-
-    const printContents = printRef.current.innerHTML;
-    const originalContents = document.body.innerHTML;
-
-    document.body.innerHTML = printContents;
     window.print();
-    document.body.innerHTML = originalContents;
-
-    window.location.reload(); // restore React state
   };
 
   return (
     <>
       <Card className="w-full max-w-2xl mx-auto rounded-2xl border bg-background shadow-md overflow-hidden p-0">
-        {/* ================= HEADER ================= */}
+        {/* ================= HEADER ================= */
         <CardHeader className="bg-gradient-to-r from-sky-600 to-cyan-500 text-white px-6 py-5 ">
           <div className="flex items-center gap-4">
             <div className="p-3 bg-white/20 rounded-xl">
@@ -204,7 +256,7 @@ export function RegistrationForm() {
           </div>
         </CardHeader>
 
-        {/* ================= CONTENT ================= */}
+        /* ================= CONTENT ================= */}
         <CardContent className="px-6 pb-6 pt-4 bg-muted/0">
           <div className="bg-background rounded-xl px-6 pb-6 pt-4 space-y-6">
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
@@ -306,6 +358,20 @@ export function RegistrationForm() {
                   </PopoverContent>
                 </Popover>
               </div>
+              {/* No HP */}
+              <div className="space-y-2">
+                <Label>Nomor HP</Label>
+                <Input
+                  {...register("phoneNumber")}
+                  placeholder="08xxxxxxxxxx"
+                  className="h-11 rounded-lg"
+                />
+                {errors.phoneNumber && (
+                  <p className="text-sm text-destructive">
+                    {errors.phoneNumber.message}
+                  </p>
+                )}
+              </div>
 
               {/* Alamat */}
               <div className="space-y-2">
@@ -319,60 +385,61 @@ export function RegistrationForm() {
                 />
               </div>
 
-              {/* Dokter */}
               <div className="space-y-2">
-                <Label className="flex items-center gap-2">
-                  <Stethoscope className="w-4 h-4 text-primary" /> Pilih Dokter
-                </Label>
-                <Select
-                  value={selectedDoctorId}
-                  onValueChange={(v) =>
-                    setValue("doctorId", v, { shouldValidate: true })
-                  }
-                >
+                <Label>Pilih Poli</Label>
+                <Select onValueChange={(v) => setValue("poliId", v)}>
                   <SelectTrigger className="h-11 rounded-lg">
-                    <SelectValue placeholder="Pilih dokter yang tersedia" />
+                    <SelectValue placeholder="Pilih poli" />
                   </SelectTrigger>
-                  <SelectContent className="bg-white border shadow-lg rounded-lg z-50">
-                    {doctors.map((doctor) => {
-                      const available = isDoctorAvailable(doctor);
-                      return (
-                        <SelectItem
-                          key={doctor.id}
-                          value={doctor.id}
-                          disabled={!available}
-                          className="py-2"
-                        >
-                          <div className="flex flex-col">
-                            <span className="font-medium">{doctor.name}</span>
-                            <span
-                              className={cn(
-                                "text-xs",
-                                available
-                                  ? "text-emerald-600"
-                                  : "text-muted-foreground",
-                              )}
-                            >
-                              {doctor.poli} —{" "}
-                              {available
-                                ? "Tersedia hari ini"
-                                : "Tidak tersedia"}
-                            </span>
-                          </div>
-                        </SelectItem>
-                      );
-                    })}
+                  <SelectContent className="z-50 bg-white border border-gray-300 shadow-lg">
+                    {polis.map((p) => (
+                      <SelectItem key={p._id} value={p._id}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
 
-              {/* Poli */}
-              {selectedDoctor && (
+              {selectedPoliId && (
                 <div className="space-y-2">
-                  <Label className="text-muted-foreground">Poli Tujuan</Label>
-                  <div className="h-11 px-4 flex items-center rounded-lg border border-dashed bg-muted/40">
-                    <span className="font-medium">{selectedDoctor.poli}</span>
-                  </div>
+                  <Label>Pilih Dokter</Label>
+                  <Select onValueChange={(v) => setValue("doctorId", v)}>
+                    <SelectTrigger className="h-11 rounded-lg">
+                      <SelectValue placeholder="Pilih dokter" />
+                    </SelectTrigger>
+                    <SelectContent className="z-50 bg-white border border-gray-300 shadow-lg">
+                      {doctorsByPoli.map((d) => (
+                        <SelectItem key={d._id} value={d._id}>
+                          {d.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              {selectedDoctorId && (
+                <div className="space-y-2">
+                  <Label>Jadwal Dokter</Label>
+                  {schedules.length > 0 ? (
+                    <Select onValueChange={(v) => setValue("scheduleId", v)}>
+                      <SelectTrigger className="h-11 rounded-lg">
+                        <SelectValue placeholder="Pilih jadwal" />
+                      </SelectTrigger>
+                      <SelectContent className="z-50 bg-white border border-gray-300 shadow-lg">
+                        {schedules.map((s) => (
+                          <SelectItem key={s._id} value={s._id}>
+                            {s.day} ({s.startTime} - {s.endTime})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      Tidak ada jadwal untuk dokter ini pada hari ini.
+                    </p>
+                  )}
                 </div>
               )}
 

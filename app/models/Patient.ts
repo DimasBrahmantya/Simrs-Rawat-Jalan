@@ -21,6 +21,15 @@ const PatientSchema = new Schema(
       enum: ["waiting", "called", "completed"],
       default: "waiting",
     },
+    medicalRecordNumber: {
+      type: String,
+      unique: true,
+      index: true,
+    },
+    phoneNumber: {
+      type: String,
+      required: true,
+    },
   },
   { timestamps: true },
 );

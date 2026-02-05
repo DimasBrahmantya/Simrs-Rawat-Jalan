@@ -10,6 +10,8 @@ import {
   Monitor,
   FileText,
   Building2,
+  ClipboardCheck,
+  Settings,
 } from "lucide-react";
 
 import { Button } from "@/app/components/ui/button";
@@ -17,8 +19,10 @@ import { cn } from "@/lib/utils";
 
 const navigation = [
   { name: "Pendaftaran", href: "/", icon: ClipboardList },
+  { name: "Admisi", href: "/admisi", icon: ClipboardCheck },
   { name: "Monitoring", href: "/monitoring", icon: FileText },
   { name: "Dashboard Antrian", href: "/dashboard", icon: Monitor },
+  { name: "Master Layanan", href: "/admisi/master-layanan", icon: Settings },
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -91,7 +95,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 variant="destructive"
                 size="sm"
                 onClick={handleLogout}
-                className="ml-2"
+                className="ml-2 bg-red-600 hover:bg-red-700"
               >
                 Logout
               </Button>
@@ -133,30 +137,30 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 ))}
               {isAdmin && (
                 <Button
-                  variant="destructive"
-                  className="w-full mt-2"
-                  onClick={() => {
-                    setMobileMenuOpen(false);
-                    handleLogout();
-                  }}
-                >
-                  Logout
-                </Button>
-              )}
-            </nav>
+                    variant="destructive"
+                    className="w-full mt-2 bg-red-600 hover:bg-red-700"
+                    onClick={() => {
+                      setMobileMenuOpen(false);
+                      handleLogout();
+                    }}
+                  >
+                    Logout
+                  </Button>
+                )}
+              </nav>
+            </div>
+          )}
+        </header>
+
+        {/* Main */}
+        <main className="container py-6 flex-1 px-2 sm:px-4">{children}</main>
+
+        {/* Footer */}
+        <footer className="border-t bg-muted/30">
+          <div className="container py-6 text-center text-sm text-muted-foreground">
+            © 2026 Sistem Informasi Rumah Sakit – Rawat Jalan
           </div>
-        )}
-      </header>
-
-      {/* Main */}
-      <main className="container py-6 flex-1 px-2 sm:px-4">{children}</main>
-
-      {/* Footer */}
-      <footer className="border-t bg-muted/30">
-        <div className="container py-6 text-center text-sm text-muted-foreground">
-          © 2026 Sistem Informasi Rumah Sakit – Rawat Jalan
-        </div>
-      </footer>
-    </div>
-  );
-}
+        </footer>
+      </div>
+    );
+  }

@@ -46,8 +46,7 @@ import {
 } from "@/app/components/ui/table";
 
 import { cn } from "@/lib/utils";
-import { doctors } from "@/app/stores/patientStore";
-import { Patient, PatientStatus } from "@/app/types/patient";
+import { PatientStatus } from "@/app/types/patient";
 
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -75,7 +74,8 @@ const statusConfig: Record<
 };
 
 export function MonitoringDashboard() {
-  const [patients, setPatients] = useState<Patient[]>([]);
+  const [visits, setVisits] = useState<any[]>([]);
+  const [doctors, setDoctors] = useState<any[]>([]);
   const [filterPoli, setFilterPoli] = useState("all");
   const [filterDoctor, setFilterDoctor] = useState("all");
   const [filterMonth, setFilterMonth] = useState<Date>(new Date());
@@ -83,32 +83,38 @@ export function MonitoringDashboard() {
 
   /* ================= FETCH DB ================= */
   useEffect(() => {
-    const fetchPatients = async () => {
-      const res = await fetch("/api/patients", { cache: "no-store" });
+    const fetchVisits = async () => {
+      const res = await fetch("/api/visits", { cache: "no-store" });
       const data = await res.json();
-      setPatients(data);
+      setVisits(data);
     };
-    fetchPatients();
+    const fetchDoctors = async () => {
+      const res = await fetch("/api/doctors", { cache: "no-store" });
+      const data = await res.json();
+      setDoctors(data);
+    };
+    fetchVisits();
+    fetchDoctors();
   }, []);
 
   /* ================= FILTER DOCTOR ================= */
   const filteredDoctors = useMemo(() => {
     if (filterPoli === "all") return doctors;
-    return doctors.filter((d) => d.poli === filterPoli);
-  }, [filterPoli]);
+    return doctors.filter((d) => d.poliId?.name === filterPoli);
+  }, [filterPoli, doctors]);
 
-  /* ================= FILTER PATIENT ================= */
-  const filteredPatients = useMemo(() => {
-    return patients
-      .filter((p) => {
-        const date = new Date(p.registrationDate);
+  /* ================= FILTER VISIT ================= */
+  const filteredVisits = useMemo(() => {
+    return visits
+      .filter((v) => {
+        const date = new Date(v.registrationDate);
         const matchMonth =
           date.getMonth() === filterMonth.getMonth() &&
           date.getFullYear() === filterMonth.getFullYear();
 
-        const matchPoli = filterPoli === "all" || p.poli === filterPoli;
+        const matchPoli = filterPoli === "all" || v.poliId?.name === filterPoli;
         const matchDoctor =
-          filterDoctor === "all" || p.doctorId === filterDoctor;
+          filterDoctor === "all" || v.doctorId?._id === filterDoctor;
 
         return matchMonth && matchPoli && matchDoctor;
       })
@@ -117,39 +123,77 @@ export function MonitoringDashboard() {
           new Date(b.registrationDate).getTime() -
           new Date(a.registrationDate).getTime(),
       );
-  }, [patients, filterMonth, filterPoli, filterDoctor]);
+  }, [visits, filterMonth, filterPoli, filterDoctor]);
 
   /* ================= UPDATE STATUS ================= */
-  const handleCall = async (patientId: string) => {
-    const res = await fetch(`/api/patients/${patientId}`, {
+  const handleCall = async (visitId: string) => {
+    console.log("handleCall called with visitId:", visitId); // Tambahkan ini
+    console.log("Type of visitId:", typeof visitId); // Tambahkan ini
+
+    if (!visitId || visitId.length !== 24) {
+      // ObjectId MongoDB biasanya 24 karakter
+      console.error("Invalid visitId:", visitId);
+      return;
+    }
+
+    // Set semua visit lain di poli yang sama dengan status "called" menjadi "completed"
+    const visitToCall = visits.find((v) => v._id === visitId);
+    console.log("visitToCall:", visitToCall); // Tambahkan ini
+    if (visitToCall) {
+      const poliId = visitToCall.poliId._id;
+      console.log("poliId:", poliId); // Tambahkan ini
+      const calledInPoli = visits.filter(
+        (v) =>
+          v.poliId._id === poliId && v.status === "called" && v._id !== visitId,
+      );
+      console.log("calledInPoli to complete:", calledInPoli); // Tambahkan ini
+      for (const v of calledInPoli) {
+        console.log("Completing visit:", v._id); // Tambahkan ini
+        const completeRes = await fetch(`/api/visits/${v._id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "complete" }),
+        });
+        console.log("Complete response status:", completeRes.status); // Tambahkan ini
+      }
+    }
+
+    // Panggil visit yang dipilih
+    console.log("Calling visit:", visitId); // Tambahkan ini
+    const res = await fetch(`/api/visits/${visitId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "call" }),
     });
 
-    const updated = await res.json();
-
-    // reload ulang dari DB biar konsisten
-    const refreshed = await fetch("/api/patients", { cache: "no-store" });
-    setPatients(await refreshed.json());
+    console.log("Call response status:", res.status); // Tambahkan ini
+    if (res.ok) {
+      console.log("Call successful, reloading visits"); // Tambahkan ini
+      // reload ulang dari DB biar konsisten
+      const refreshed = await fetch("/api/visits", { cache: "no-store" });
+      setVisits(await refreshed.json());
+    } else {
+      console.error("Call failed, response:", await res.text()); // Tambahkan ini
+    }
   };
-
-  const handleComplete = async (patientId: string) => {
-    await fetch(`/api/patients/${patientId}`, {
+  const handleComplete = async (visitId: string) => {
+    const res = await fetch(`/api/visits/${visitId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "complete" }),
     });
 
-    const refreshed = await fetch("/api/patients", { cache: "no-store" });
-    setPatients(await refreshed.json());
+    if (res.ok) {
+      const refreshed = await fetch("/api/visits", { cache: "no-store" });
+      setVisits(await refreshed.json());
+    }
   };
 
   /* ================= PDF ================= */
   const generatePDF = () => {
     const doc = new jsPDF();
     doc.setFontSize(16);
-    doc.text("Rekapitulasi Pendaftaran Pasien", 14, 20);
+    doc.text("Rekapitulasi Kunjungan Pasien", 14, 20);
     doc.setFontSize(10);
     doc.text(
       `Periode: ${format(filterMonth, "MMMM yyyy", { locale: idLocale })}`,
@@ -160,20 +204,20 @@ export function MonitoringDashboard() {
     autoTable(doc, {
       startY: 36,
       head: [["No", "Nama", "Antrian", "Poli", "Dokter", "Tanggal", "Status"]],
-      body: filteredPatients.map((p, i) => [
+      body: filteredVisits.map((v, i) => [
         i + 1,
-        p.name,
-        p.queueDisplay,
-        p.poli,
-        p.doctorName,
-        format(new Date(p.registrationDate), "dd/MM/yyyy"),
-        statusConfig[p.status].label,
+        v.patientId?.name || "N/A",
+        v.queueDisplay,
+        v.poliId?.name || "N/A",
+        v.doctorId?.name || "N/A",
+        format(new Date(v.registrationDate), "dd/MM/yyyy"),
+        statusConfig[v.status as PatientStatus].label,
       ]),
       styles: { fontSize: 8 },
       headStyles: { fillColor: [14, 165, 233] },
     });
 
-    doc.save(`rekap-pasien-${format(filterMonth, "yyyy-MM")}.pdf`);
+    doc.save(`rekap-kunjungan-${format(filterMonth, "yyyy-MM")}.pdf`);
   };
 
   const [mounted, setMounted] = useState(false);
@@ -183,8 +227,8 @@ export function MonitoringDashboard() {
   }, []);
 
   const polis = useMemo(
-    () => [...new Set(patients.map((p) => p.poli))],
-    [patients],
+    () => [...new Set(visits.map((v) => v.poliId?.name).filter(Boolean))],
+    [visits],
   );
   if (!mounted) return null;
 
@@ -198,10 +242,10 @@ export function MonitoringDashboard() {
             </div>
             <div>
               <CardTitle className="text-lg font-semibold">
-                Monitoring Pendaftaran
+                Monitoring Kunjungan
               </CardTitle>
               <CardDescription className="text-white/80">
-                Rekap & pengelolaan pasien rawat jalan
+                Rekap & pengelolaan kunjungan pasien rawat jalan
               </CardDescription>
             </div>
           </div>
@@ -265,7 +309,7 @@ export function MonitoringDashboard() {
               <SelectContent className="bg-white">
                 <SelectItem value="all">Semua Dokter</SelectItem>
                 {filteredDoctors.map((d) => (
-                  <SelectItem key={d.id} value={d.id}>
+                  <SelectItem key={d._id} value={d._id}>
                     {d.name}
                   </SelectItem>
                 ))}
@@ -288,7 +332,7 @@ export function MonitoringDashboard() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredPatients.length === 0 ? (
+                {filteredVisits.length === 0 ? (
                   <TableRow key="empty">
                     <TableCell colSpan={7} className="h-24 text-center">
                       <User className="mx-auto mb-2" />
@@ -296,44 +340,46 @@ export function MonitoringDashboard() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredPatients.map((p) => (
-                    <TableRow key={p._id}>
+                  filteredVisits.map((v) => (
+                    <TableRow key={v._id}>
                       <TableCell className="font-bold relative pointer-events-auto">
-                        {p.queueDisplay}
+                        {v.queueDisplay}
                       </TableCell>
-                      <TableCell>{p.name}</TableCell>
+                      <TableCell>{v.patientId?.name || "N/A"}</TableCell>
                       <TableCell>
-                        <Badge variant="secondary">{p.poli}</Badge>
+                        <Badge variant="secondary">
+                          {v.poliId?.name || "N/A"}
+                        </Badge>
                       </TableCell>
-                      <TableCell>{p.doctorName}</TableCell>
+                      <TableCell>{v.doctorId?.name || "N/A"}</TableCell>
                       <TableCell>
-                        {format(new Date(p.registrationDate), "dd/MM/yyyy")}
+                        {format(new Date(v.registrationDate), "dd/MM/yyyy")}
                       </TableCell>
                       <TableCell>
                         <Badge
                           className={cn(
                             "gap-1",
-                            statusConfig[p.status].className,
+                            statusConfig[v.status as PatientStatus].className,
                           )}
                         >
-                          {statusConfig[p.status].icon}
-                          {statusConfig[p.status].label}
+                          {statusConfig[v.status as PatientStatus].icon}
+                          {statusConfig[v.status as PatientStatus].label}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right relative z-20 pointer-events-auto">
-                        {p.status === "waiting" && (
+                        {v.status === "waiting" && (
                           <Button
                             size="sm"
-                            onClick={() => handleCall(p._id)}
+                            onClick={() => handleCall(v._id)}
                             className="cursor-pointer pointer-events-auto"
                           >
                             Panggil
                           </Button>
                         )}
-                        {p.status === "called" && (
+                        {v.status === "called" && (
                           <Button
                             size="sm"
-                            onClick={() => handleComplete(p._id)}
+                            onClick={() => handleComplete(v._id)}
                             className="cursor-pointer pointer-events-auto"
                           >
                             Selesai
